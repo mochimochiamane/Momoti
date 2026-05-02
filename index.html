@@ -1,0 +1,208 @@
+<!DOCTYPE html><html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2048 AI アシスタント（最強版）</title>
+<style>
+body { font-family: sans-serif; text-align: center; background:#faf8ef; }
+.grid { display:grid; grid-template-columns: repeat(4,70px); gap:10px; justify-content:center; margin:20px; }
+.cell { width:70px; height:70px; background:#cdc1b4; display:flex; align-items:center; justify-content:center; font-size:18px; border-radius:8px; cursor:pointer; }
+button { padding:12px 16px; font-size:16px; border:none; border-radius:8px; background:#8f7a66; color:white; margin:5px; }
+.result { font-size:24px; margin-top:20px; }
+</style>
+</head>
+<body>
+<h2>2048 AI アシスタント（最強版）</h2>
+<div class="grid" id="grid"></div>
+<div>
+  <button onclick="analyze()">解析</button>
+  <button onclick="undo()">1手戻る</button>
+</div>
+<div class="result" id="result"></div><script>
+const SIZE = 4;
+const DEPTH = 5;
+
+const gridEl = document.getElementById('grid');
+let cells = [];
+let history = []; // 履歴保存
+
+function nextValue(v){
+  if(v===0) return 2;
+  if(v>=2048) return 0;
+  return v*2;
+}
+
+for(let i=0;i<16;i++){
+  const cell=document.createElement('div');
+  cell.className='cell';
+  cell.innerText='';
+  cell.value=0;
+
+  cell.onclick = () => {
+    saveState();
+    cell.value = nextValue(cell.value);
+    cell.innerText = cell.value===0 ? '' : cell.value;
+  };
+
+  gridEl.appendChild(cell);
+  cells.push(cell);
+}
+
+function saveState(){
+  let state = cells.map(c=>c.value);
+  history.push(state);
+}
+
+function undo(){
+  if(history.length===0) return;
+  let prev = history.pop();
+  for(let i=0;i<16;i++){
+    cells[i].value = prev[i];
+    cells[i].innerText = prev[i]===0 ? '' : prev[i];
+  }
+}
+
+function getGrid(){
+  let g=[];
+  for(let i=0;i<4;i++){
+    g[i]=[];
+    for(let j=0;j<4;j++){
+      g[i][j]=cells[i*4+j].value;
+    }
+  }
+  return g;
+}
+
+function clone(g){ return g.map(r=>r.slice()); }
+
+function moveLeft(grid){
+  let moved=false;
+  for(let i=0;i<4;i++){
+    let row=grid[i].filter(v=>v);
+    for(let j=0;j<row.length-1;j++){
+      if(row[j]===row[j+1]){ row[j]*=2; row[j+1]=0; }
+    }
+    row=row.filter(v=>v);
+    while(row.length<4) row.push(0);
+    if(grid[i].toString()!=row.toString()) moved=true;
+    grid[i]=row;
+  }
+  return moved;
+}
+
+function rotate(g){
+  let r=[[],[],[],[]];
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++) r[j][3-i]=g[i][j];
+  return r;
+}
+
+function move(grid,dir){
+  let g=clone(grid);
+  for(let i=0;i<dir;i++) g=rotate(g);
+  let moved=moveLeft(g);
+  for(let i=0;i<(4-dir)%4;i++) g=rotate(g);
+  return {grid:g,moved};
+}
+
+function smoothness(grid){
+  let s=0;
+  for(let i=0;i<4;i++){
+    for(let j=0;j<4;j++){
+      if(grid[i][j]){
+        let v=Math.log2(grid[i][j]);
+        if(j+1<4 && grid[i][j+1]) s -= Math.abs(v - Math.log2(grid[i][j+1]));
+        if(i+1<4 && grid[i+1][j]) s -= Math.abs(v - Math.log2(grid[i+1][j]));
+      }
+    }
+  }
+  return s;
+}
+
+function monotonicity(grid){
+  let totals=[0,0,0,0];
+  for(let i=0;i<4;i++){
+    for(let j=0;j<3;j++){
+      let cur=grid[i][j]?Math.log2(grid[i][j]):0;
+      let nxt=grid[i][j+1]?Math.log2(grid[i][j+1]):0;
+      if(cur>nxt) totals[0]+=nxt-cur;
+      else totals[1]+=cur-nxt;
+    }
+  }
+  for(let j=0;j<4;j++){
+    for(let i=0;i<3;i++){
+      let cur=grid[i][j]?Math.log2(grid[i][j]):0;
+      let nxt=grid[i+1][j]?Math.log2(grid[i+1][j]):0;
+      if(cur>nxt) totals[2]+=nxt-cur;
+      else totals[3]+=cur-nxt;
+    }
+  }
+  return Math.max(totals[0], totals[1]) + Math.max(totals[2], totals[3]);
+}
+
+function snakeWeight(grid){
+  const weights=[
+    [65536,16384,4096,1024],
+    [256,1024,4096,16384],
+    [256,64,16,4],
+    [1,4,16,64]
+  ];
+  let score=0;
+  for(let i=0;i<4;i++){
+    for(let j=0;j<4;j++){
+      score += grid[i][j] * weights[i][j];
+    }
+  }
+  return score;
+}
+
+function evaluate(grid){
+  let empty=0;
+  for(let r of grid)for(let v of r) if(v===0) empty++;
+
+  return (
+    snakeWeight(grid)*1.0 +
+    smoothness(grid)*3.0 +
+    monotonicity(grid)*5.0 +
+    empty*10000
+  );
+}
+
+const cache = new Map();
+function hash(grid){ return grid.flat().join(','); }
+
+let endTime=0;
+
+function expectimax(grid, depth, isPlayer){
+  if(Date.now()>endTime) return evaluate(grid);
+
+  const key = hash(grid)+'|'+depth+'|'+isPlayer;
+  if(cache.has(key)) return cache.get(key);
+
+  if(depth===0) return evaluate(grid);
+
+  let result;
+
+  if(isPlayer){
+    let moves=[];
+    for(let d=0;d<4;d++){
+      let {grid:g,moved}=move(grid,d);
+      if(moved) moves.push({grid:g,score:evaluate(g)});
+    }
+    moves.sort((a,b)=>b.score-a.score);
+
+    let best=-Infinity;
+    for(let m of moves){
+      best=Math.max(best, expectimax(m.grid, depth-1, false));
+    }
+    result=best;
+  } else {
+    let cellsList=[];
+    for(let i=0;i<4;i++)for(let j=0;j<4;j++) if(grid[i][j]===0) cellsList.push([i,j]);
+
+    if(cellsList.length===0) return evaluate(grid);
+
+    let total=0;
+    for(let [i,j] of cellsList){
+      let g2=clone(grid);
+      g2[i][j]=2;
+      total+=0.9*expectimax(g2, de
