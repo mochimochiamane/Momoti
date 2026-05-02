@@ -125,11 +125,35 @@ function rotate(g){
 
 // 移動
 function move(grid,dir){
-  let g=clone(grid);
-  for(let i=0;i<dir;i++) g=rotate(g);
-  let moved=moveLeft(g);
-  for(let i=0;i<(4-dir)%4;i++) g=rotate(g);
-  return {grid:g,moved};
+  let g = clone(grid);
+  let moved = false;
+
+  if(dir === 0){ // ← 左
+    moved = moveLeft(g);
+  }
+
+  if(dir === 2){ // → 右
+    g = g.map(row => row.reverse());
+    moved = moveLeft(g);
+    g = g.map(row => row.reverse());
+  }
+
+  if(dir === 1){ // ↑ 上
+    // 転置
+    g = transpose(g);
+    moved = moveLeft(g);
+    g = transpose(g);
+  }
+
+  if(dir === 3){ // ↓ 下
+    g = transpose(g);
+    g = g.map(row => row.reverse());
+    moved = moveLeft(g);
+    g = g.map(row => row.reverse());
+    g = transpose(g);
+  }
+
+  return {grid:g, moved};
 }
 
 // 評価（簡易）
@@ -198,6 +222,17 @@ function analyze(){
   document.getElementById('result').innerText =
     'おすすめ: ' + (bestDirIndex>=0 ? dirs[bestDirIndex] : 'なし');
 }
+
+function transpose(g){
+  let r=[[],[],[],[]];
+  for(let i=0;i<4;i++){
+    for(let j=0;j<4;j++){
+      r[j][i] = g[i][j];
+    }
+  }
+  return r;
+}
+
 </script>
 
 </body>
