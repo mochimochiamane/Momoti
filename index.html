@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>2048 AI アシスタント</title>
+<title>2048 AI アシスタント（1024制限版）</title>
 
 <style>
 body { font-family: sans-serif; text-align: center; background:#faf8ef; }
@@ -15,12 +15,12 @@ button { padding:12px 16px; font-size:16px; border:none; border-radius:8px; back
 </head>
 
 <body>
-<h2>2048 AI アシスタント</h2>
+<h2>2048 AI（1024で止まる版）</h2>
 
 <div class="grid" id="grid"></div>
 
 <div>
-  <button onclick="analyze()">解析</button>
+  <button onclick="analyze()">解析（1秒思考）</button>
   <button onclick="undo()">1手戻る</button>
 </div>
 
@@ -30,11 +30,12 @@ button { padding:12px 16px; font-size:16px; border:none; border-radius:8px; back
 const gridEl = document.getElementById('grid');
 let cells = [];
 let history = [];
+let endTime = 0;
 
-// タップで値変更
+// タップ入力
 function nextValue(v){
   if(v===0) return 2;
-  if(v>=2048) return 0;
+  if(v>=1024) return 0;
   return v*2;
 }
 
@@ -55,7 +56,7 @@ for(let i=0;i<16;i++){
   cells.push(cell);
 }
 
-// 状態保存
+// 保存
 function saveState(){
   history.push(cells.map(c=>c.value));
 }
@@ -70,7 +71,7 @@ function undo(){
   }
 }
 
-// 盤面取得
+// 取得
 function getGrid(){
   let g=[];
   for(let i=0;i<4;i++){
@@ -82,7 +83,7 @@ function getGrid(){
   return g;
 }
 
-// 表示更新（←今回追加の核）
+// 描画
 function render(grid){
   for(let i=0;i<4;i++){
     for(let j=0;j<4;j++){
@@ -94,58 +95,73 @@ function render(grid){
   }
 }
 
-// クローン
+// clone
 function clone(g){ return g.map(r=>r.slice()); }
 
-// 左移動
+// 左移動（1024合体禁止）
 function moveLeft(grid){
   let moved=false;
+
   for(let i=0;i<4;i++){
-    let row=grid[i].filter(v=>v);
-    for(let j=0;j<row.length-1;j++){
-      if(row[j]===row[j+1]){
-        row[j]*=2;
-        row[j+1]=0;
+    let row = grid[i].filter(v=>v);
+    let newRow = [];
+
+    for(let j=0;j<row.length;j++){
+      if(
+        j < row.length-1 &&
+        row[j] === row[j+1] &&
+        row[j] !== 1024
+      ){
+        newRow.push(row[j]*2);
+        j++;
+      } else {
+        newRow.push(row[j]);
       }
     }
-    row=row.filter(v=>v);
-    while(row.length<4) row.push(0);
-    if(grid[i].toString()!=row.toString()) moved=true;
-    grid[i]=row;
+
+    while(newRow.length < 4) newRow.push(0);
+
+    if(grid[i].toString() !== newRow.toString()) moved = true;
+
+    grid[i] = newRow;
   }
+
   return moved;
 }
 
-// 回転
-function rotate(g){
+// 転置
+function transpose(g){
   let r=[[],[],[],[]];
-  for(let i=0;i<4;i++)for(let j=0;j<4;j++) r[j][3-i]=g[i][j];
+  for(let i=0;i<4;i++){
+    for(let j=0;j<4;j++){
+      r[j][i] = g[i][j];
+    }
+  }
   return r;
 }
 
 // 移動
-function move(grid,dir){
+function move(grid, dir){
   let g = clone(grid);
   let moved = false;
 
-  if(dir === 0){ // ← 左
+  if(dir === 0){ // 左
     moved = moveLeft(g);
   }
 
-  if(dir === 2){ // → 右
+  if(dir === 2){ // 右
     g = g.map(row => row.reverse());
     moved = moveLeft(g);
     g = g.map(row => row.reverse());
   }
 
-  if(dir === 1){ // ↑ 上
-    // 転置
+  if(dir === 1){ // 上
     g = transpose(g);
     moved = moveLeft(g);
     g = transpose(g);
   }
 
-  if(dir === 3){ // ↓ 下
+  if(dir === 3){ // 下
     g = transpose(g);
     g = g.map(row => row.reverse());
     moved = moveLeft(g);
@@ -156,15 +172,16 @@ function move(grid,dir){
   return {grid:g, moved};
 }
 
-// 評価（簡易）
+// 評価
 function evaluate(grid){
   let empty=0;
   for(let r of grid)for(let v of r) if(v===0) empty++;
   return empty * 10000;
 }
 
-// AI
+// タイム制AI
 function expectimax(grid, depth, isPlayer){
+  if(Date.now() > endTime) return evaluate(grid);
   if(depth===0) return evaluate(grid);
 
   if(isPlayer){
@@ -175,6 +192,7 @@ function expectimax(grid, depth, isPlayer){
       best=Math.max(best, expectimax(g, depth-1, false));
     }
     return best;
+
   } else {
     let cellsList=[];
     for(let i=0;i<4;i++)for(let j=0;j<4;j++) if(grid[i][j]===0) cellsList.push([i,j]);
@@ -187,16 +205,19 @@ function expectimax(grid, depth, isPlayer){
       g2[i][j]=2;
       total+=expectimax(g2, depth-1, true);
     }
+
     return total / cellsList.length;
   }
 }
 
-// 解析（←ここが進化）
+// 解析（動く）
 function analyze(){
   saveState();
 
   const grid=getGrid();
   const dirs=['←','↑','→','↓'];
+
+  endTime = Date.now() + 1000;
 
   let best=-Infinity;
   let bestDirIndex=-1;
@@ -206,7 +227,7 @@ function analyze(){
     let {grid:g,moved}=move(grid,d);
     if(!moved) continue;
 
-    let val=expectimax(g,12,false); //深さここ！！！！！！!!!!!!!!!!!!!!!!!!!
+    let val=expectimax(g,10,false);
 
     if(val>best){
       best=val;
@@ -216,23 +237,12 @@ function analyze(){
   }
 
   if(bestGrid){
-    render(bestGrid); // ←実際に動く！
+    render(bestGrid);
   }
 
   document.getElementById('result').innerText =
     'おすすめ: ' + (bestDirIndex>=0 ? dirs[bestDirIndex] : 'なし');
 }
-
-function transpose(g){
-  let r=[[],[],[],[]];
-  for(let i=0;i<4;i++){
-    for(let j=0;j<4;j++){
-      r[j][i] = g[i][j];
-    }
-  }
-  return r;
-}
-
 </script>
 
 </body>
