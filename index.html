@@ -206,7 +206,7 @@ function analyze(){
     let {grid:g,moved}=move(grid,d);
     if(!moved) continue;
 
-    let val=expectimax(g,20,false); //深さここ！！！！！！
+    let val=expectimax(g,12,false); //深さここ！！！！！！!!!!!!!!!!!!!!!!!!!
 
     if(val>best){
       best=val;
